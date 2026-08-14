@@ -30,6 +30,43 @@ files, updater aborts listing PIDs.
 - If a blocker is unkillable by owner *and* admin (state Unknown, 0% CPU): it's
   kernel-wedged. Reboot. Do not spend hours on it.
 
+## The updater must never run from the binary it replaces
+
+The classic Windows trap: the agent's CLI is a console-script shim / zipapp trampoline
+(`Scripts\agent.exe`), and `agent update` launched from it must *rewrite that same exe*.
+
+- **Error semantics tell you the holder**: "os error 5 / Access denied" on delete = a
+  *running image* (delete blocked, rename allowed). "os error 32 / sharing violation" =
+  some process holds an *open handle without FILE_SHARE_DELETE* (rename ALSO fails —
+  quarantine/rename dances die with PermissionError).
+- A zipapp-style shim is both at once: the trampoline maps the image AND the child
+  interpreter keeps/reopens a read handle on the exe for lazy imports mid-install.
+  Result: intermittent error-32 failures that correlate with machine load, not with
+  anything the user did. Slow/busy machines reproduce; fast laptops don't.
+- **The fix is always the same**: relaunch the update via the interpreter —
+  `venv\Scripts\python.exe -m <cli_module> update` (or the equivalent `node script.js`,
+  never the packaged shim). Check every entry path: user shell, GUI update button,
+  handoff scripts, self-repair. A traceback showing `...\agent.exe\__main__.py` is the
+  smoking gun that an invocation still uses the shim.
+- GUI updaters often "verify the exe is unlocked, then run the update *from that exe*"
+  — the preflight passes and the update still dies. Patch the handoff to use the
+  interpreter and add the patch to the idempotent re-apply script.
+
+## Interrupted self-repair: markers and orphan locks
+
+Updaters leave breadcrumbs (`.update-incomplete` + a `.lock` claimed with the healer's
+PID). Know the lifecycle:
+
+- Marker present + lock whose PID is **dead** = orphaned: every launch *silently skips*
+  healing until a stale-lock timeout (often 1 h). Check the PID inside the lockfile;
+  delete only the orphan lock, then trigger healing via a normal command and let it
+  **finish**.
+- **Never truncate a live updater/healer through pipeline operators that close the
+  pipe** (`Select-Object -First`, `head`): they kill the child mid-install and create
+  the orphaned state above. Use `-Last`, a file redirect, or a background task.
+- Trivial commands (`--version`) may exit before the healing hook runs; trigger healing
+  with a real subcommand (e.g. the service status command).
+
 ## Dependency-phase failures
 
 - **Engine/version gates** (e.g. `EBADENGINE: requires node >=X`): the runtime, not the
@@ -61,6 +98,8 @@ files, updater aborts listing PIDs.
 ## After the update
 
 - Restart the service form deliberately; verify PID and health endpoint/status command.
+- **Restarting the GUI can kill the service**: desktop shells that manage a backend may
+  kill process trees on startup/shutdown. After any GUI restart, re-check the service.
 - Re-run the agent's doctor/health check.
 - Re-apply local patches (script), then verify the features they patch.
 - If the update wiped pinned tool versions (security pins), re-pin and re-audit.

@@ -1,7 +1,7 @@
 ---
 name: agent-fix-agent
 description: "Maintain, diagnose, and repair another AI agent's installation — updates, disk hygiene, skills, configs — without losing user data."
-version: 0.1.0
+version: 0.2.0
 author: ForeverAfter (Jorge Cordero) + Claude Code
 license: MIT
 platforms: [linux, macos, windows]
@@ -92,3 +92,12 @@ Load only what the task needs — this hub plus one reference is usually enough.
 - **Custom content never lives inside managed components**: knowledge goes to the
   user's wiki/KB, machine-specific behavior goes to companion skills, working
   artifacts go to project folders. Managed (bundled) components stay stock.
+- **An updater must never run from the binary it replaces**: shim/trampoline exes hold
+  handles on themselves (error 32 on Windows). Always relaunch via the interpreter
+  (`python -m <module>`) — in every entry path, including the GUI's handoff script.
+- **Error 5 vs error 32 name the culprit**: 5 = running image (rename works, delete
+  doesn't); 32 = open handle without share-delete (rename fails too). Diagnose from the
+  number before hunting processes.
+- **Never truncate a live installer's output** with pipe-closing operators
+  (`Select-Object -First`, `head`) — the broken pipe kills the child mid-install and
+  leaves orphaned recovery markers/locks that silently block self-healing.
