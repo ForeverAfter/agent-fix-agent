@@ -51,6 +51,15 @@ The classic Windows trap: the agent's CLI is a console-script shim / zipapp tram
 - GUI updaters often "verify the exe is unlocked, then run the update *from that exe*"
   — the preflight passes and the update still dies. Patch the handoff to use the
   interpreter and add the patch to the idempotent re-apply script.
+- Self-lock *preflights* have their own failure mode: if any module in the CLI's
+  import chain loads a native extension at module scope (a crypto lib pulled in by a
+  plugin registry, say), the guard trips on EVERY update and defers/refuses forever.
+  Trace with `python -X importtime -c "import <cli_module>"`, then make the heavy
+  import lazy (move it inside the functions that use it) and upstream that fix.
+- When upstream adopts one of your local fixes (pins, handoff patches), **retire the
+  local version the same day** — a redundant re-pin or re-patch becomes *drift* that
+  newer updaters detect and fight, turning yesterday's medicine into today's disease.
+  Replace retired patches with a cheap regression check that alerts if upstream reverts.
 
 ## Interrupted self-repair: markers and orphan locks
 
